@@ -26,23 +26,68 @@ The Snakefile, magpie_shiny_app.py and scripts and figures folders should all be
 The MAGPIE pipeline automatically detects the files in your input folder and makes decisions accordingly so you must ensure your files follow the following structure:
 
     [sample name]
-    ├── visium                               # Spaceranger outputs
-    │   ├── filtered_feature_bc_matrix.h5
-    │   ├── spatial
+    ├── visium/                              # Spaceranger HD outputs
+    │   ├── spatial/                         # Shared spatial data (images, positions)
     │   │   ├── aligned_fiducials.jpg
     │   │   ├── detected_tissue_image.jpg
     │   │   ├── scalefactors_json.json
     │   │   ├── tissue_hires_image.png
-    │   │   ├── tissue_lores_image.png
-    │   │   ├── tissue_positions_list.csv
-    ├── msi                    
-    │   ├── MSI_intensities.csv              # Table of intensities with MSI peaks on columns and pixels on rows
-    │   ├── MSI_metadata.csv                 # Table of metadata about MSI pixels, including x and y coordinate columns
-    │   │── MSI_HE.[jpg,png,tiff]                       # (OPTIONAL) intermediate MSI image to assist with coregistration
-    ├── landmarks_MSI2HE.csv                 # (OPTIONAL) Table of identified landmarks between MSI image and MSI H&E image (added by shiny app or identified externally)
-    ├── landmarks_MSI2HE.csv                 # (OPTIONAL) Table of identified landmarks between MSI H&E and Visium H&E image (added by shiny app or identified externally)
-    └── landmarks_noHE.csv                   # (OPTIONAL) Table of identified landmarks between MSI image and Visium H&E (added by shiny app or identified externally). 
-                                               Either landmarks_noHE.csv or both landmarks_MSI2HE.csv and landmarks_MSI2HE.csv are required for coregistration.
+    │   │   ├── tissue_lowres_image.png
+    │   │   ├── tissue_square_002um_positions.parquet
+    │   │   ├── tissue_square_008um_positions.parquet
+    │   │   └── tissue_square_016um_positions.parquet
+    │   ├── 002um/                           # 2µm resolution gene expression
+    │   │   └── filtered_feature_bc_matrix.h5
+    │   ├── 008um/                           # 8µm resolution gene expression
+    │   │   └── filtered_feature_bc_matrix.h5
+    │   └── 016um/                           # 16µm resolution gene expression
+    │       └── filtered_feature_bc_matrix.h5
+    ├── msi/                    
+    │   ├── MSI_intensities.csv              # Intensities (peaks on columns, pixels on rows)
+    │   ├── MSI_metadata.csv                 # Metadata with spot_id, x, y columns
+    │   └── MSI_HE.[jpg,png,tiff]            # (OPTIONAL) Intermediate MSI H&E image
+    ├── landmarks_MSI2HE.csv                 # (OPTIONAL) Landmarks: MSI image → MSI H&E
+    ├── landmarks_HE2HE.csv                  # (OPTIONAL) Landmarks: MSI H&E → Visium H&E
+    └── landmarks_noHE.csv                   # (OPTIONAL) Landmarks: MSI image → Visium H&E (direct)
+
+**Note:** For Visium HD, gene expression files are organized by resolution in separate folders (`002um/`, `008um/`, `016um/`). 
+Set `bin_size` in `config/config.yaml` to select which resolution to use.
+
+The `visium_hd_index` rule runs `scripts/create_visium_hd_index.py` with `--visium_mode` from top-level `visium_mode` (`hd` | `classic`). In `hd` mode the script expects a matching HD bin positions file for `visium.hd.bin_size` and **fails** if none is found, unless you opt in via `visium.hd.allow_classic_fallback: true` or `visium.hd.require_hd: false` (both cause `--allow_classic_fallback` to be passed). Classic spot geometry is not interchangeable with true HD bins—use those flags only for debugging or migration.
+
+`aggregate_to_msi_resolution` reads `visium.spaceranger_dir` for `scalefactors_json.json` (uses **`microns_per_pixel`** for fullres µm→px; HD JSON may also include `bin_size_um` / `spot_diameter_fullres` for cross-checks), the HD bin CSV, Space Ranger `filtered_feature_bc_matrix.h5` at the chosen resolution, and `msi.intensities_csv` + `transformed.csv`. Observation order follows **MSI intensities** (every `spot_id` there must appear in `transformed.csv`). Set **`msi.radius_um`** as the search radius (µm) on bin centers—**10 µm** is a typical default when MSI pixels are **~20 µm** wide (≈ half-width from center). Genes are pooled with `aggregation.method`: `sum` / `mean` / `median`.
+
+## Run-scoped outputs and manifest (Visium HD only)
+
+Set `run.enabled: true` in `config/config.yaml` to write **registration and HD integration** artifacts under:
+
+`output/<sample>/runs/<subdir>/` (e.g. `runs/TPS/002um_run0`).
+
+The HD bin index CSV stays shared at `output/<sample>/visium_hd_square_<bin>um_bins.csv` (Space Ranger geometry only).
+
+- **`run.subdir`**: logical folder under `runs/` (can include slashes).
+- **`run.append_timestamp`**: if `true`, Snakemake appends `_YYYYMMDD_HHMMSS` to `subdir` so each invocation gets a **new** directory.
+- **`manifest.yaml`**: written in the run root when `run.enabled` is true; includes **`selected_msi_peaks`** (path, `exists`, size) from `msi.selected_peaks` in config (default `input/<sample>/msi/MSI_selected_peaks.txt`), plus registration and pipeline settings.
+
+`run.enabled` requires `visium_mode: hd`. The classic Visium branch is unchanged and does not use run-scoped paths.
+
+## Image Coordinate Spaces
+
+Visium HD uses a multi-resolution image pyramid. Understanding these spaces is important for coordinate alignment:
+
+| Space | Image File | Typical Size | Scale Factor | Usage |
+|-------|-----------|--------------|--------------|-------|
+| **FULLRES** | (Original scan) | ~11,000 × 12,000 px | 1.0 (reference) | HD bin positions in parquet files |
+| **HIRES** | `tissue_hires_image.png` | ~5,000 × 6,000 px | ~0.48 | Registration, visualization |
+| **LOWRES** | `tissue_lowres_image.png` | ~500 × 600 px | ~0.05 | Thumbnails |
+
+**Key points:**
+- `scalefactors_json.json` contains `tissue_hires_scalef` to convert FULLRES → HIRES
+- HD bin positions (`pxl_col_in_fullres`, `pxl_row_in_fullres`) are in **FULLRES** coordinates
+- Registration uses `tissue_hires_image.png`, so transformed MSI coordinates are in **HIRES** space
+- MAGPIE automatically converts between spaces during mapping
+
+**Important:** `scalefactors_json.json` is **shared** across all HD resolutions (002um, 008um, 016um) because it describes the image scaling, not the bin sizes. The bin-specific information is in each parquet file.
 
 ## MSI data
 

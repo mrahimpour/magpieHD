@@ -2,3 +2,13 @@
 .snakemake/
 __pycache__/
 output/
+
+# Large / local data (Visium, MSI, landmarks); keep paths documented in README instead
+input/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Local Python environments
+.venv/
+venv/

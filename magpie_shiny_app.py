@@ -211,6 +211,28 @@ def server(input, output, session):
         ui.update_selectize("peak_choice", choices=list(msi_intensities.columns))
         ui.update_selectize("peak_choices", choices=list(msi_intensities.columns))
         return list(msi_intensities.columns)
+
+    # Helper to save the MSI peaks that were used for colouring/registration
+    def save_msi_peak_selection():
+        """
+        Save the current MSI colouring choice and selected peaks to a small
+        text file alongside the MSI inputs, for reproducibility.
+        """
+        try:
+            sample_id = input.pick_sample()
+            mode = input.msi_colouring()
+            # Individual peak: single string; otherwise a list of peaks
+            if mode == 'Individual peak':
+                peaks = [input.peak_choice()] if input.peak_choice() is not None else []
+            else:
+                peaks = list(input.peak_choices())
+            out_path = os.path.join('input', sample_id, 'msi_selected_peaks.txt')
+            with open(out_path, 'w') as fh:
+                fh.write(f"msi_colouring_mode\t{mode}\n")
+                fh.write("peaks\t" + ",".join(peaks) + "\n")
+        except Exception:
+            # Reproducibility metadata should never break the interactive app
+            pass
     
     @output
     @render.text
@@ -277,6 +299,8 @@ def server(input, output, session):
     def save_flipped_dim_red():
         msi_coords = msi_dimred()
         msi_coords[['spot_id','x','y','color']].to_csv('input/'+input.pick_sample()+'/msi/MSI_dimreduction.csv',index=False)
+        # Also save which MSI peaks / colouring were used, for reproducibility
+        save_msi_peak_selection()
 
     
     @reactive.calc
@@ -518,6 +542,8 @@ def server(input, output, session):
     @reactive.event(input.download_noHE)
     def download_noHE():
        coords_calc_noHE().to_csv('input/'+input.pick_sample()+'/landmarks_noHE.csv',index=False)
+       # Persist MSI peak selection at the time landmarks are saved
+       save_msi_peak_selection()
 
     @reactive.Effect
     @reactive.event(input.save_flipped_dim_red)
@@ -722,6 +748,8 @@ def server(input, output, session):
     @reactive.event(input.download_MSI2HE)
     def download_MSI2HE():
         coords_calc_MSI2HE().to_csv('input/'+input.pick_sample()+'/landmarks_MSI2HE.csv',index=False)
+        # Persist MSI peak selection at the time landmarks are saved
+        save_msi_peak_selection()
 
 
     # All elements for picking landmarks between MSI H&E and Visium ------------------------------------
@@ -912,6 +940,8 @@ def server(input, output, session):
     @reactive.event(input.download_HE2HE)
     def download_HE2HE():
         coords_calc_HE2HE().to_csv('input/'+input.pick_sample()+'/landmarks_HE2HE.csv',index=False)
+        # Persist MSI peak selection at the time landmarks are saved
+        save_msi_peak_selection()
 
 
 

@@ -10,9 +10,10 @@ This script:
 The pipeline is designed for use within Snakemake and expects the following folder structure:
 input/<sample>/msi/
 input/<sample>/visium/
-output/<sample>/
+output/<sample>/   (or output/<sample>/runs/<subdir>/ when ``run.enabled`` is true — see docs/inputs.md)
 """
 
+import os
 import pandas as pd
 import matplotlib.pyplot as plt
 from skimage.io import imread, imsave
@@ -91,7 +92,8 @@ def map_coords_noHE(sample,
 def map_coords_MSI2HE(sample,
                       transform,
                       msi_he_img,
-                      verbose=True):
+                      verbose=True,
+                      output_dir=None):
     
     """
     Map MSI pixel coordinates onto their corresponding MSI H&E image.
@@ -173,7 +175,9 @@ def map_coords_MSI2HE(sample,
     # plot coordinates on top of H&E image
     plt.imshow(out_image)
     plt.scatter(x=transformed_coords['x'],y=transformed_coords['y'],c=transformed_coords['color'],s=0.1,alpha=0.5)
-    fig.savefig('output/' + sample +'/MSI_HE_withMSI2HECoords.png')
+    out_dir = output_dir if output_dir else os.path.join("output", sample)
+    os.makedirs(out_dir, exist_ok=True)
+    fig.savefig(os.path.join(out_dir, "MSI_HE_withMSI2HECoords.png"))
     plt.close(fig)
 
     return msi_coords_tfm
@@ -260,7 +264,8 @@ def map_coords_HE2HE(sample,
 # check whether there is an MSI H&E image and use the transformation pipeline depending on result
 def apply_mapping(sample,
                   msi_he_img,
-                  verbose=True):
+                  verbose=True,
+                  output_dir=None):
     
     """
     Dispatch function selecting the correct mapping pipeline depending on
@@ -278,16 +283,29 @@ def apply_mapping(sample,
     if not (msi_he_img is None):
         if verbose:
             print("MSI H&E image identified.")
-        intermediate_coords = map_coords_MSI2HE(sample,snakemake.params['MSI2HE_transform'],msi_he_img,verbose=verbose)
-        return(map_coords_HE2HE(sample,intermediate_coords,snakemake.params['HE2HE_transform'],msi_he_img,verbose=verbose))
+        intermediate_coords = map_coords_MSI2HE(
+            sample,
+            snakemake.params["MSI2HE_transform"],
+            msi_he_img,
+            verbose=verbose,
+            output_dir=output_dir,
+        )
+        return map_coords_HE2HE(
+            sample,
+            intermediate_coords,
+            snakemake.params["HE2HE_transform"],
+            msi_he_img,
+            verbose=verbose,
+        )
     else:
         if verbose:
             print("No MSI H&E image identified.")
-        return(map_coords_noHE(sample,snakemake.params['no_HE_transform'],verbose=verbose))
+        return map_coords_noHE(sample, snakemake.params["no_HE_transform"], verbose=verbose)
 
 # run full coregistration pipeline on selected sample
 def run_coreg(sample,
-              verbose=True):
+              verbose=True,
+              output_dir=None):
 
     """
     Run the full MSI -> Visium coregistration pipeline on a given sample.
@@ -297,7 +315,7 @@ def run_coreg(sample,
     1. Detect MSI H&E image (jpg/png/tiff) if available.
     2. Apply appropriate mapping strategy (with or without MSI H&E).
     3. Save:
-        - transformed coordinates (output/<sample>/transformed.csv)
+        - transformed coordinates (transformed.csv under output_dir)
         - transformed image (either MSI H&E or Visium H&E)
         - diagnostic images with overlaid coordinates
 
@@ -307,6 +325,8 @@ def run_coreg(sample,
         Sample name passed via Snakemake.
     verbose : bool
         If True, print progress and file-saving messages.
+    output_dir : str or None
+        Directory for all outputs; default ``output/<sample>/``.
 
     Notes
     -----
@@ -315,6 +335,9 @@ def run_coreg(sample,
         snakemake.params['HE2HE_transform']
         snakemake.params['no_HE_transform']
     """
+
+    out_dir = output_dir if output_dir else os.path.join("output", sample)
+    os.makedirs(out_dir, exist_ok=True)
 
     # check if there is any image file MSI_HE.jpg/tiff/png
     if glob.glob('input/'+sample+'/msi/MSI_HE.*') != []:
@@ -328,12 +351,32 @@ def run_coreg(sample,
         msi_he_img = None
 
     # get new MSI coordinates and image
-    transformed_result = apply_mapping(sample,
-                                       msi_he_img,
-                                       verbose=verbose)
+    transformed_result = apply_mapping(
+        sample,
+        msi_he_img,
+        verbose=verbose,
+        output_dir=out_dir,
+    )
     transformed_coords = transformed_result['transformed_coords']
     msi_he_image = transformed_result['msi_he_image']
     transformed_coords.columns = ['x','y']
+
+    # Diagnostic: print transformed coordinate ranges and fraction outside H&E bounds
+    # Rationale: helps detect scaling/origin/axis issues when overlays look stretched or off-image
+    try:
+        visium_he_img_diag = imread('input/'+sample+'/visium/spatial/tissue_hires_image.png')
+        hh_diag, ww_diag = visium_he_img_diag.shape[:2]
+        xv_diag = transformed_coords['x'].to_numpy()
+        yv_diag = transformed_coords['y'].to_numpy()
+        outside_diag = (((xv_diag < 0) | (xv_diag > ww_diag) | (yv_diag < 0) | (yv_diag > hh_diag)).mean())
+        print(
+            f"[diagnostic][alter_data] HE size: {ww_diag}x{hh_diag} "
+            f"x:[{xv_diag.min():.1f},{xv_diag.max():.1f}] "
+            f"y:[{yv_diag.min():.1f},{yv_diag.max():.1f}] "
+            f"| outside={outside_diag:.3f}"
+        )
+    except Exception as _e:
+        pass
 
     # identify if output image is MSI H&E (if available) or Visium H&E
     
@@ -345,14 +388,14 @@ def run_coreg(sample,
         fig, ax = plt.subplots(nrows=1, ncols=1 )
         plt.imshow(out_image)
         plt.scatter(x=transformed_coords['x'],y=transformed_coords['y'],s=0.1,c='r',alpha=0.7)
-        fig.savefig('output/'+sample+'/transformed_withCoords.png')
+        fig.savefig(os.path.join(out_dir, "transformed_withCoords.png"))
         plt.close(fig)
     else:
         visium_he_img = imread('input/'+sample+'/visium/spatial/tissue_hires_image.png')
         out_image = visium_he_img
 
     # save H&E image (either MSI H&E if available or Visium otherwise)
-    plt.imsave(arr=out_image,fname='output/'+sample+'/transformed.png')
+    plt.imsave(arr=out_image, fname=os.path.join(out_dir, "transformed.png"))
 
     # save Visium H&E image with transformed coordinates overlaid
     if verbose:
@@ -361,7 +404,7 @@ def run_coreg(sample,
     fig, ax = plt.subplots(nrows=1, ncols=1)
     plt.imshow(visium_he_img)
     plt.scatter(x=transformed_coords['x'],y=transformed_coords['y'],s=0.1,c='r',alpha=0.7)
-    fig.savefig('output/'+sample+'/transformed_withCoords_VisiumHE.png')
+    fig.savefig(os.path.join(out_dir, "transformed_withCoords_VisiumHE.png"))
 
     # save transformed coordinates
     if verbose:
@@ -372,11 +415,17 @@ def run_coreg(sample,
         msi_coords = pd.read_csv('input/'+sample+'/msi/MSI_metadata.csv')
     transformed_coords['spot_id']=msi_coords['spot_id']
     transformed_coords = transformed_coords[['spot_id','x','y']]
-    transformed_coords.to_csv('output/'+sample+'/transformed.csv',index=False)
+    transformed_coords.to_csv(os.path.join(out_dir, "transformed.csv"), index=False)
 
 def main():
-    # run on current sample
-    run_coreg(snakemake.params['sample'],verbose=snakemake.params['verbose'])
+    from pathlib import Path
+
+    out_dir = str(Path(snakemake.output.transformed_csv).parent)
+    run_coreg(
+        snakemake.params["sample"],
+        verbose=snakemake.params["verbose"],
+        output_dir=out_dir,
+    )
 
 if __name__ == "__main__":
     main()

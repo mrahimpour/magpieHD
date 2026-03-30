@@ -3,23 +3,12 @@
 <img src="figures/magpie_logo.png" width="200">
 </p>
 
-Recent developments in spatially resolved -omics have enabled the joint study of gene expression, metabolite levels and tissue morphology, offering greater insights into biological pathways. 
-Integrating these modalities from matched tissue sections to probe spatially-coordinated processes, however, remains challenging. 
-Here we introduce _MAGPIE_, a framework for co-registering spatially resolved transcriptomics, metabolomics, and tissue morphology from the same or consecutive sections. 
-We show _MAGPIE_’s generalisability and scalability on spatial multi-omics data from multiple tissues, combining Visium with MALDI and DESI mass spectrometry imaging. 
-_MAGPIE_ was also applied to new multi-modal datasets generated with a specialised sampling strategy to characterise the metabolic and transcriptomic landscape in an in vivo model of drug-induced pulmonary fibrosis and to link small-molecule co-detection with endogenous lung responses. 
-_MAGPIE_ demonstrates the refined resolution and enhanced interpretability that spatial multi-modal analyses provide for studying tissue injury especially in pharmacological contexts, and delivers a modular, accessible workflow for data integration.
+Recent developments in spatially resolved -omics have enabled studies linking gene expression and metabolite levels to tissue morphology, offering new insights into biological pathways. By capturing multiple modalities on matched tissue sections, one can better probe how different biological entities interact in a spatially coordinated manner. However, such cross-modality integration presents experimental and computational challenges. 
+To align multimodal datasets into a shared coordinate system and facilitate enhanced integration and analysis, we propose *MAGPIE* (Multi-modal Alignment of Genes and Peaks for Integrated Exploration), a framework for co-registering spatially resolved transcriptomics, metabolomics, and tissue morphology from the same or consecutive sections. 
+We illustrate the generalisability and scalability of *MAGPIE* on spatial multi-omics data from multiple tissues, combining Visium with both MALDI and DESI mass spectrometry imaging. *MAGPIE* was also applied to newly generated multimodal datasets created using specialised experimental sampling strategy to characterise the metabolic and transcriptomic landscape in an in vivo model of drug-induced pulmonary fibrosis, to showcase the linking of small-molecule co-detection with endogenous responses in lung tissue.
+*MAGPIE* highlights the refined resolution and increased interpretability of spatial multimodal analyses in studying tissue injury, particularly in pharmacological contexts, and offers a modular, accessible computational workflow for data integration.
 
-_MAGPIE_ has now been published in Nature Communications, please cite the following if you use our tool:
-
-> **Spatially resolved integrative analysis of transcriptomic and metabolomic changes in tissue injury studies.**  
-> Eleanor C. Williams, Lovisa Franzén, Martina Olsson Lindvall, Gregory Hamm, Steven Oag,
-> Muntasir Mamun Majumder, James Denholm, Azam Hamidinekoo, Javier Escudero Morlanes,
-> Marco Vicari, Joakim Lundeberg, Laura Setyo, Trevor M. Godfrey, Livia S. Eberlin,
-> Aleksandr Zakirov, Jorrit J. Hornberg, Marianna Stamou, Patrik L. Ståhl, Anna Ollerstam,
-> Jennifer Y. Tan, Irina Mohorianu.
-> _Nature Communications_, 17, Article 205. (2026)  
-> https://doi.org/10.1038/s41467-025-68003-w
+Preprint: https://www.biorxiv.org/content/10.1101/2025.02.26.640381v1
 
 ## Installation
 
@@ -56,23 +45,29 @@ Installation should take up to ~10 minutes on a normal desktop computer.
 The MAGPIE pipeline automatically detects the files in your input folder and makes decisions accordingly so you must ensure your files follow the following structure:
 
     [sample name]
-    ├── visium                               # Spaceranger outputs
-    │   ├── filtered_feature_bc_matrix.h5
-    │   ├── spatial
+    ├── visium/                              # Spaceranger outputs
+    │   ├── spatial/                         # Shared spatial data
     │   │   ├── aligned_fiducials.jpg
     │   │   ├── detected_tissue_image.jpg
     │   │   ├── scalefactors_json.json
     │   │   ├── tissue_hires_image.png
-    │   │   ├── tissue_lores_image.png
-    │   │   ├── tissue_positions_list.csv
-    ├── msi                    
+    │   │   ├── tissue_lowres_image.png
+    │   │   ├── tissue_square_002um_positions.parquet
+    │   │   ├── tissue_square_008um_positions.parquet
+    │   │   └── tissue_square_016um_positions.parquet
+    │   ├── 002um/                           # 2µm resolution gene expression
+    │   │   └── filtered_feature_bc_matrix.h5
+    │   ├── 008um/                           # 8µm resolution gene expression
+    │   │   └── filtered_feature_bc_matrix.h5
+    │   └── 016um/                           # 16µm resolution gene expression
+    │       └── filtered_feature_bc_matrix.h5
+    ├── msi/                    
     │   ├── MSI_intensities.csv              # Table of intensities with MSI peaks on columns and pixels on rows
     │   ├── MSI_metadata.csv                 # Table of metadata about MSI pixels, including x and y coordinate columns
-    │   │── MSI_HE.[jpg,png,tiff]            # (OPTIONAL) intermediate MSI image to assist with coregistration
-    ├── landmarks_MSI2HE.csv                 # (OPTIONAL) Table of identified landmarks between MSI image and MSI H&E image (added by shiny app or identified externally)
-    ├── landmarks_MSI2HE.csv                 # (OPTIONAL) Table of identified landmarks between MSI H&E and Visium H&E image (added by shiny app or identified externally)
-    └── landmarks_noHE.csv                   # (OPTIONAL) Table of identified landmarks between MSI image and Visium H&E (added by shiny app or identified externally). 
-                                               landmarks_noHE.csv or landmarks_MSI2HE.csv and landmarks_MSI2HE.csv are required for coregistration.
+    │   └── MSI_HE.[jpg,png,tiff]            # (OPTIONAL) intermediate MSI image to assist with coregistration
+    ├── landmarks_MSI2HE.csv                 # (OPTIONAL) Landmarks between MSI image and MSI H&E
+    ├── landmarks_HE2HE.csv                  # (OPTIONAL) Landmarks between MSI H&E and Visium H&E
+    └── landmarks_noHE.csv                   # (OPTIONAL) Landmarks between MSI image and Visium H&E (direct)
     
 
 
@@ -87,6 +82,75 @@ For each sample you will be prompted to select some manual landmarks then downlo
 ## Running the snakemake pipeline
 
 Once landmarks have been selected for each sample, you can switch to the snakemake pipeline to perform the coregistration. Again you must be in the folder with all files in the _snakemake_ folder in this repository as well as an _input_ folder as described in the previous section with your newly selected landmarks. You can then run the pipeline using ``` snakemake --cores [n] ``` where _n_ is the number of cores you would like to use. You can explicitly state which samples you would like to use by listing them in a *selected.txt* file within the *input* folder and equivalently specify some files you would like to exclude using a *exclude.txt* file.
+
+## QC: Visium HD gene check
+
+Optional script: check whether a gene appears in the Space Ranger **filtered** HD matrix and whether it has non-zero UMIs. Run from the repository root with the same Python environment you use for scanpy (e.g. your conda env):
+
+```bash
+python scripts/QC/visium_hd_gene_qc.py \
+  --matrix input/<sample>/visium/002um/filtered_feature_bc_matrix.h5 \
+  --gene P2ry6 \
+  --case-insensitive
+```
+
+A JSON report is **always** written next to that sample’s outputs: default `output/<sample>/qc/visium_hd_gene_qc_<gene>.json` when `--matrix` looks like `input/<sample>/visium/...`, otherwise `output/unscoped/qc/...`. Use `--out-json` to set the path explicitly. Use `--help` for all options (`--json`, `--strict`, etc.).
+
+Minimal spatial plot (one gene on H&E): edit the CONFIG block in `scripts/QC/plot_one_gene_visium_hd.py`, then `python scripts/QC/plot_one_gene_visium_hd.py` from the repo root.
+
+## Multi-modal Integration (Visium HD)
+
+After registration, use the aggregation script to create an integrated multi-modal dataset:
+
+```bash
+python scripts/aggregate_to_msi_resolution.py \
+    --sample YOUR_SAMPLE \
+    --bin_size 008 \
+    --msi_radius_um 10.0 \
+    --agg_method sum
+```
+
+**Parameters:**
+- `--bin_size`: HD resolution — `002` (2µm), `008` (8µm), or `016` (16µm)
+- `--msi_radius_um`: Search radius in µm on bin centers (default 10 ≈ half of ~20µm MSI pixel)
+
+See `QuickReview.md` for detailed workflow documentation.
+
+## Output Structure
+
+The pipeline produces two types of outputs:
+
+### Resolution-Independent (Shared)
+These files are generated once during registration and apply to all HD resolutions:
+
+| File | Description |
+|------|-------------|
+| `transformed.csv` | MSI coordinates transformed to HD pixel space |
+| `transformed.png` | Registration visualization |
+| `transformed_withCoords_VisiumHE.png` | Registration overlay on H&E |
+| `visium_hd_square_XXXum_bins.csv` | HD bin positions for each resolution |
+
+### Resolution-Specific
+These files are generated per resolution (002um, 008um, 016um):
+
+| File | Description |
+|------|-------------|
+| `hd_bins_per_msi_spot.csv` | HD bins within each MSI spot's footprint (1:N mapping) |
+| `aggregated_gene_expression.h5ad` | Gene expression aggregated to MSI resolution |
+| `integrated_multimodal.h5ad` | **Combined dataset with genes + metabolites** |
+| `spaceranger_hd/` | MSI in Space Ranger MEX format |
+| `spatialdata.zarr/` | SpatialData export for Squidpy |
+
+```
+output/{sample}/
+├── transformed.csv                      # Shared
+├── visium_hd_square_008um_bins.csv      # Shared
+├── 002um/                               # 2µm outputs
+│   ├── integrated_multimodal.h5ad
+│   └── spaceranger_hd/
+├── 008um/                               # 8µm outputs
+└── 016um/                               # 16µm outputs
+```
 
 ## Tutorial
 

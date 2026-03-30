@@ -1,0 +1,89 @@
+# ---- Optional: isolate each analysis under output/<sample>/runs/<subdir>/ (HD workflow only) ----
+run:
+  enabled: True
+  # Leave empty to auto-build subdir from coregistration + visium.hd.bin_size + run_index:
+  #   <noHE>_<MSI2HE>_<HE2HE>/<bin_size>um_run<run_index>
+  # e.g. affine_affine_tps/002um_run0  (see coregistration: and visium.hd.bin_size)
+  # Set subdir explicitly only to override that layout.
+  subdir: ""
+  # Bump this when repeating the same transform + bin (e.g. new landmarks / parameters).
+  run_index: 0
+  # If true, append _YYYYMMDD_HHMMSS to subdir so each Snakemake invocation gets a new folder.
+  append_timestamp: false
+
+# ---- Visium mode (classic vs HD) ----
+visium_mode: hd         # classic | hd
+visium:
+  sample: "1719-MMC-PDAC"  # used in output folder names
+  # Path to the Visium (ST) sample's Space Ranger outputs
+  # For HD this is the HD Space Ranger output directory
+  spaceranger_dir: "input/1719-MMC-PDAC/visium/"
+  # For HD only:
+  hd:
+    # Which binned resolution to use (strings: "002" | "008" | "016")
+    bin_size: "002"
+    # Index script: when visium_mode is hd, require a matched HD bin positions file (default).
+    # Set require_hd: false to allow classic tissue_positions if HD tables are missing (debug / migration).
+    require_hd: true
+    # Explicit opt-in to classic spot geometry when HD tables are missing (same effect as require_hd: false
+    # for substitution; both may be set for clarity).
+    allow_classic_fallback: false
+
+# ---- MSI inputs ----
+msi:
+  # MSI metadata table (must include at least: spot_id, x, y)
+  metadata_csv: "input/1719-MMC-PDAC/msi/MSI_metadata.csv"
+  # MSI intensities table (spot_id + mz columns)
+  intensities_csv: "input/1719-MMC-PDAC/msi/MSI_intensities.csv"
+  # Peak list (Shiny saves MSI_selected_peaks.txt here). Recorded in manifest.yaml when run.enabled is true.
+  # Alias in YAML may also be selected_msi_peaks — write_run_manifest reads selected_peaks first.
+  selected_peaks: "input/1719-MMC-PDAC/msi/MSI_selected_peaks.txt"
+  # aggregate_to_msi_resolution.py (Visium HD + MSI):
+  # Radius in MICRONS around each coregistered MSI point; converted to fullres px via
+  # scalefactors_json.json microns_per_pixel. Pool all HD bin *centers* within that disk.
+  # ~10 µm ≈ radius / half-width for a ~20 µm ion-image pixel; increase to pool more HD bins.
+  # Not classic Visium spot diameter unless that matches your MSI footprint.
+  radius_um: 10.0
+
+# aggregate_to_msi_resolution.py: sum | mean | median over HD bins within msi.radius_um
+aggregation:
+  method: sum
+
+# ---- Registration transform choices ----
+# Affine: only translation, rotation, scaling, shear (global linear transform).
+# Thin‑Plate Spline (TPS): a smooth, non‑rigid transformation that can bend/warp to better match local distortions between MSI and H&E images, 
+# at the cost of more parameters to estimate from landmarks and more sensitivity to noisy / poorly matched landmarks.
+# - More parameters to estimate from landmarks.
+# - More sensitivity to noisy / poorly matched landmarks.
+
+coregistration:
+  no_HE_transform: "affine"      # if you use the no-HE path
+  MSI2HE_transform: "affine"    # MSI → MSI H&E
+  HE2HE_transform: "TPS"      # MSI H&E → Visium H&E
+
+
+spatialdata:
+  # comma-separated metabolite names as present in "list of metabolites.csv"
+  # Start with a small subset (3–10 m/z values) from "list of metabolites.csv that you care about most.
+  # leave empty to skip MSI rasters and export only HE + shapes + table
+
+  # export_spatialdata_zarr produces a spatialdata.zarr containing:
+  # - the Visium HE image (or he_override if set)
+  # - HD bin geometry (hd_bins shapes) => essentially “where is this bin in tissue space?”
+  # - optional MSI rasters (2D images for selected m/z features)
+ 
+  features: "mz-734.56,mz-760.58" # metabolite m/z values
+  
+  # optional: path to a specific HE image file
+  # the default is the Visium (HD) tissue_hires_image.png from spatial/ as the HE image.
+  # "he_override" forces a different HE image file to be used, e.g.:
+  # - a post‑processed HE with annotations,
+  # - a version that has been coregistered/rotated differently,
+  # - a pathology‑annotated image
+  he_override: ""  
+
+  # Gaussian smoothing kernel (σ in pixels) applied to the MSI features before or during rasterization.
+  gaussian_sigma: 1.5  # 0 disables smoothing
+
+  # If you prefer not to rasterize MSI features, set features: "". 
+  # You’ll still get HE + hd_bins + table, which Squidpy can use directly (e.g., per‑bin feature maps, spatial stats). 
